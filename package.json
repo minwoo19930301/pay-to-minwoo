@@ -1,0 +1,27 @@
+{
+  "name": "pay-to-minwoo",
+  "version": "0.1.0",
+  "private": true,
+  "type": "module",
+  "scripts": {
+    "dev:vercel": "vercel dev",
+    "typecheck": "tsc --noEmit",
+    "test": "vitest run",
+    "db:init:turso": "node ./scripts/init-turso-db.mjs",
+    "deploy:vercel": "vercel --prod",
+    "deploy:netlify": "netlify deploy --prod --dir public --functions netlify/functions"
+  },
+  "dependencies": {
+    "@libsql/client": "^0.17.2",
+    "hono": "^4.7.7",
+    "zod": "^3.24.2"
+  },
+  "devDependencies": {
+    "@types/node": "^24.0.0",
+    "@netlify/functions": "^5.2.0",
+    "netlify-cli": "^24.11.1",
+    "typescript": "^5.8.2",
+    "vercel": "^48.4.0",
+    "vitest": "^3.2.4"
+  }
+}
