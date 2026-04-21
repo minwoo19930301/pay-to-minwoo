@@ -52,6 +52,30 @@ type CreateOrderBody = Partial<{
 }>;
 
 const app = new Hono();
+const PAYPAL_SUPPORTED_CURRENCIES = new Set([
+  "AUD",
+  "BRL",
+  "CAD",
+  "CHF",
+  "CZK",
+  "DKK",
+  "EUR",
+  "GBP",
+  "HKD",
+  "HUF",
+  "ILS",
+  "JPY",
+  "MXN",
+  "NOK",
+  "NZD",
+  "PHP",
+  "PLN",
+  "SEK",
+  "SGD",
+  "THB",
+  "TWD",
+  "USD"
+]);
 
 function nowIso() {
   return new Date().toISOString();
@@ -383,6 +407,17 @@ app.post("/api/v1/orders/:orderId/payment-attempts/paypal", async (c) => {
 
   if (!order) {
     return c.json({ message: "Order not found." }, 404);
+  }
+
+  if (!PAYPAL_SUPPORTED_CURRENCIES.has(order.currency)) {
+    return c.json(
+      {
+        message: "Currency is not supported by PayPal Orders API.",
+        currency: order.currency,
+        supportedCurrencies: Array.from(PAYPAL_SUPPORTED_CURRENCIES).sort()
+      },
+      400
+    );
   }
 
   const idempotencyKey = c.req.header("idempotency-key")?.trim() || makeId("paypal_req");

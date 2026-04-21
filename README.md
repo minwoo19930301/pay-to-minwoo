@@ -10,6 +10,7 @@
 - frontend는 Netlify React 앱
 - DB는 Turso
 - 결제사는 현재 PayPal만 실제 연결, 다른 결제사는 같은 provider adapter 구조로 확장
+- 현재 PayPal Orders API 기준 결제 통화는 `USD`를 사용한다. `KRW`는 PayPal Orders API에서 거부된다.
 
 ## 배포 주소
 
@@ -126,6 +127,8 @@ PAYPAL_WEBHOOK_ID=...
 ```
 
 `PAYPAL_ENV=sandbox`도 mock이 아니다. PayPal sandbox API를 실제로 호출하는 provider integration 환경이다.
+
+주의: 한국어 UI도 현재는 PayPal provider가 지원하는 `USD`로 주문을 만든다. 원화 표시/환산을 붙이려면 `Order`의 표시 통화와 `PaymentAttempt`의 provider 통화를 분리해야 한다.
 
 ## 로컬 실행
 
