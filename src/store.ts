@@ -279,11 +279,15 @@ async function dropTableIfShapeChanged(client: ReturnType<typeof getClient>, tab
   }
 }
 
+async function ensureLegacyParentTables(client: ReturnType<typeof getClient>) {
+  await client.execute("create table if not exists donation_intents (id text primary key)");
+}
+
 async function dropLegacyTables(client: ReturnType<typeof getClient>) {
   await client.batch(
     [
-      { sql: "drop table if exists donation_intents" },
-      { sql: "drop table if exists checkout_attempts" }
+      { sql: "drop table if exists checkout_attempts" },
+      { sql: "drop table if exists donation_intents" }
     ],
     "write"
   );
@@ -294,12 +298,13 @@ async function ensureSchema() {
     schemaReady = (async () => {
       const client = getClient();
 
-      await dropLegacyTables(client);
-      await dropTableIfShapeChanged(client, "orders", adminTableDefinitions.orders.columns);
-      await dropTableIfShapeChanged(client, "payment_attempts", adminTableDefinitions.payment_attempts.columns);
+      await ensureLegacyParentTables(client);
+      await dropTableIfShapeChanged(client, "ledger_entries", adminTableDefinitions.ledger_entries.columns);
       await dropTableIfShapeChanged(client, "provider_events", adminTableDefinitions.provider_events.columns);
       await dropTableIfShapeChanged(client, "settlement_records", adminTableDefinitions.settlement_records.columns);
-      await dropTableIfShapeChanged(client, "ledger_entries", adminTableDefinitions.ledger_entries.columns);
+      await dropTableIfShapeChanged(client, "payment_attempts", adminTableDefinitions.payment_attempts.columns);
+      await dropLegacyTables(client);
+      await dropTableIfShapeChanged(client, "orders", adminTableDefinitions.orders.columns);
       await dropTableIfShapeChanged(client, "audit_logs", adminTableDefinitions.audit_logs.columns);
       await dropTableIfShapeChanged(client, "idempotency_records", adminTableDefinitions.idempotency_records.columns);
 
