@@ -1,4 +1,5 @@
 import { randomUUID } from "node:crypto";
+import type { Payment as PortOnePayment } from "@portone/server-sdk/payment";
 import { Hono } from "hono";
 import { cors } from "hono/cors";
 import {
@@ -37,6 +38,15 @@ import {
   parseProviderAmount,
   verifyPayPalWebhook
 } from "./paypal";
+import {
+  getPortOneCredentials,
+  getPortOnePayment,
+  getPortOneWebhookHeaders,
+  isPortOneConfigured,
+  normalizePortOnePayMethod,
+  type PortOnePayMethod,
+  verifyPortOneWebhook
+} from "./portone";
 
 type Locale = "ko" | "en";
 type Region = "domestic" | "international";
@@ -50,6 +60,21 @@ type CreateOrderBody = Partial<{
   itemName: string;
   idempotencyKey: string;
 }>;
+
+type CreatePortOneAttemptBody = Partial<{
+  payMethod: PortOnePayMethod;
+}>;
+
+type CompletePortOneAttemptBody = Partial<{
+  paymentId: string;
+  errorCode: string;
+  errorMessage: string;
+  pgCode: string;
+  pgMessage: string;
+}>;
+
+type RecognizedPortOnePayment = Extract<PortOnePayment, { status: string }>;
+type PaidPortOnePayment = Extract<RecognizedPortOnePayment, { status: "PAID" }>;
 
 const app = new Hono();
 const PAYPAL_SUPPORTED_CURRENCIES = new Set([
@@ -89,6 +114,40 @@ function currentAdminPassword() {
   return process.env.ADMIN_PASSWORD?.trim() || "321";
 }
 
+function currentAppStage() {
+  const configured = process.env.APP_STAGE?.trim().toLowerCase();
+  if (configured === "prod" || configured === "production") {
+    return "prod" as const;
+  }
+
+  if (configured === "dev" || configured === "development" || configured === "preview") {
+    return "dev" as const;
+  }
+
+  if (process.env.VERCEL_ENV?.trim() === "preview") {
+    return "dev" as const;
+  }
+
+  if (process.env.VERCEL_ENV?.trim() === "production") {
+    return "prod" as const;
+  }
+
+  return process.env.NODE_ENV === "production" ? ("prod" as const) : ("dev" as const);
+}
+
+function isPortOneDomesticEnabled() {
+  const configured = process.env.ENABLE_PORTONE_DOMESTIC_TEST?.trim().toLowerCase();
+  if (configured) {
+    return ["1", "true", "yes", "on"].includes(configured);
+  }
+
+  return currentAppStage() !== "prod";
+}
+
+function currentMode() {
+  return isPortOneDomesticEnabled() ? "multi-provider-core" : "paypal-live-only";
+}
+
 function currentFrontendBaseUrl() {
   const configured = process.env.FRONTEND_BASE_URL?.trim();
   if (configured) {
@@ -104,18 +163,27 @@ function currentBackendBaseUrl() {
     return configured.replace(/\/$/, "");
   }
 
+  if (process.env.VERCEL_URL?.trim()) {
+    return `https://${process.env.VERCEL_URL.trim().replace(/^https?:\/\//, "")}`;
+  }
+
   return process.env.VERCEL ? "https://pay-to-minwoo.vercel.app" : "http://localhost:3000";
 }
 
 function allowedOrigins() {
   const configuredOrigins = process.env.CORS_ALLOWED_ORIGINS?.trim();
-  return (
-    configuredOrigins ??
-    "http://localhost:5173,http://127.0.0.1:5173,http://localhost:4173,https://pay-to-minwoo-web.netlify.app,https://pay-to-minwoo.netlify.app"
-  )
-    .split(",")
-    .map((item) => item.trim())
-    .filter(Boolean);
+  return Array.from(
+    new Set(
+      (
+        configuredOrigins ??
+        "http://localhost:5173,http://127.0.0.1:5173,http://localhost:4173,https://pay-to-minwoo-web.netlify.app,https://pay-to-minwoo.netlify.app"
+      )
+        .split(",")
+        .map((item) => item.trim())
+        .filter(Boolean)
+        .concat(currentFrontendBaseUrl())
+    )
+  );
 }
 
 function decimalPlaces(currency: string) {
@@ -300,6 +368,236 @@ async function recordCapture(input: {
   return { captureId, grossAmount, feeAmount, netAmount, currency };
 }
 
+function makeProviderEventId(providerOrderId: string, status: string, stamp: string) {
+  return `${providerOrderId}:${status}:${stamp}`;
+}
+
+function isRecognizedPortOnePayment(payment: PortOnePayment): payment is RecognizedPortOnePayment {
+  return typeof payment.status === "string" && "id" in payment && "updatedAt" in payment;
+}
+
+async function recordPortOnePayment(input: {
+  attempt: PaymentAttemptRecord;
+  payment: PaidPortOnePayment;
+  source: "sync" | "webhook";
+  eventId?: string | null;
+  signatureVerified?: boolean;
+}) {
+  const payment = input.payment;
+  const captureId = payment.transactionId ?? payment.id;
+  const currency = payment.currency;
+  const grossAmount = Math.max(payment.amount.paid || payment.amount.total, 0);
+  const feeAmount = 0;
+  const netAmount = grossAmount;
+  const eventId = input.eventId ?? makeProviderEventId(payment.id, payment.status, payment.updatedAt);
+  const createdAt = nowIso();
+  const settlementId = makeId("settlement");
+  const existingSettlement = await getSettlementByAttemptId(input.attempt.id);
+
+  await insertProviderEvent({
+    id: makeId("event"),
+    provider: "portone",
+    providerEventId: eventId,
+    eventType: `PAYMENT.${payment.status}`,
+    source: input.source,
+    orderId: input.attempt.orderId,
+    attemptId: input.attempt.id,
+    signatureVerified: input.signatureVerified ?? input.source === "sync",
+    payload: payment,
+    receivedAt: createdAt
+  });
+
+  await updatePaymentAttempt(input.attempt.id, {
+    providerCaptureId: captureId,
+    status: "CAPTURED",
+    lastEventId: eventId,
+    updatedAt: createdAt
+  });
+  await updateOrderStatus(input.attempt.orderId, "PAID", input.attempt.id);
+
+  if (existingSettlement) {
+    await log("payment_attempt", input.attempt.id, "CAPTURE_DUPLICATE", "PortOne payment was already settled; event was recorded only.", {
+      source: input.source,
+      captureId,
+      existingSettlementId: existingSettlement.id
+    });
+    return {
+      captureId,
+      grossAmount: existingSettlement.grossAmount,
+      feeAmount: existingSettlement.feeAmount,
+      netAmount: existingSettlement.netAmount,
+      currency: existingSettlement.currency,
+      receiptUrl: payment.receiptUrl ?? null
+    };
+  }
+
+  await insertSettlementRecord({
+    id: settlementId,
+    attemptId: input.attempt.id,
+    orderId: input.attempt.orderId,
+    currency,
+    grossAmount,
+    feeAmount,
+    netAmount,
+    status: "SETTLED",
+    payoutReference: captureId,
+    createdAt,
+    updatedAt: createdAt,
+    paidOutAt: null
+  });
+  await insertLedgerEntry({
+    id: makeId("ledger"),
+    orderId: input.attempt.orderId,
+    attemptId: input.attempt.id,
+    settlementId,
+    type: "payment_captured",
+    amount: grossAmount,
+    currency,
+    direction: "credit",
+    createdAt,
+    metadata: { provider: "portone", captureId, paymentId: payment.id }
+  });
+  await log("payment_attempt", input.attempt.id, "CAPTURED", "PortOne payment was verified and recorded.", {
+    source: input.source,
+    captureId,
+    grossAmount,
+    feeAmount,
+    netAmount,
+    currency,
+    receiptUrl: payment.receiptUrl ?? null
+  });
+
+  return { captureId, grossAmount, feeAmount, netAmount, currency, receiptUrl: payment.receiptUrl ?? null };
+}
+
+async function syncPortOneAttempt(input: {
+  attempt: PaymentAttemptRecord;
+  payment: PortOnePayment;
+  source: "sync" | "webhook";
+  eventId?: string | null;
+  signatureVerified?: boolean;
+}) {
+  const payment = input.payment;
+  if (!isRecognizedPortOnePayment(payment)) {
+    throw new Error("PortOne returned an unsupported payment shape.");
+  }
+
+  const now = nowIso();
+  const providerEventId = input.eventId ?? makeProviderEventId(payment.id, payment.status, payment.updatedAt);
+
+  if (payment.status === "PAID") {
+    const summary = await recordPortOnePayment({
+      attempt: input.attempt,
+      payment,
+      source: input.source,
+      eventId: providerEventId,
+      signatureVerified: input.signatureVerified
+    });
+    return {
+      ok: true as const,
+      provider: "portone" as const,
+      paymentStatus: payment.status,
+      attemptStatus: "CAPTURED" as const,
+      orderStatus: "PAID" as const,
+      captureId: summary.captureId,
+      amount: toDisplayAmount(summary.grossAmount, summary.currency),
+      currency: summary.currency,
+      receiptUrl: summary.receiptUrl
+    };
+  }
+
+  await insertProviderEvent({
+    id: makeId("event"),
+    provider: "portone",
+    providerEventId,
+    eventType: `PAYMENT.${payment.status}`,
+    source: input.source,
+    orderId: input.attempt.orderId,
+    attemptId: input.attempt.id,
+    signatureVerified: input.signatureVerified ?? input.source === "sync",
+    payload: payment,
+    receivedAt: now
+  });
+
+  if (payment.status === "FAILED") {
+    await updatePaymentAttempt(input.attempt.id, {
+      providerCaptureId: payment.transactionId ?? null,
+      status: "FAILED",
+      lastEventId: providerEventId,
+      updatedAt: now
+    });
+    await updateOrderStatus(input.attempt.orderId, "FAILED", input.attempt.id);
+    await log("payment_attempt", input.attempt.id, "FAILED", "PortOne payment failed.", {
+      source: input.source,
+      failure: payment.failure
+    });
+
+    return {
+      ok: true as const,
+      provider: "portone" as const,
+      paymentStatus: payment.status,
+      attemptStatus: "FAILED" as const,
+      orderStatus: "FAILED" as const,
+      captureId: payment.transactionId ?? null,
+      amount: toDisplayAmount(payment.amount.total, payment.currency),
+      currency: payment.currency,
+      receiptUrl: null
+    };
+  }
+
+  if (payment.status === "CANCELLED" || payment.status === "PARTIAL_CANCELLED") {
+    await updatePaymentAttempt(input.attempt.id, {
+      providerCaptureId: payment.transactionId ?? null,
+      status: "REFUNDED",
+      lastEventId: providerEventId,
+      updatedAt: now
+    });
+    await updateOrderStatus(input.attempt.orderId, "REFUNDED", input.attempt.id);
+    await log("payment_attempt", input.attempt.id, "REFUNDED", "PortOne payment was canceled or refunded.", {
+      source: input.source,
+      paymentStatus: payment.status,
+      cancellations: payment.cancellations
+    });
+
+    return {
+      ok: true as const,
+      provider: "portone" as const,
+      paymentStatus: payment.status,
+      attemptStatus: "REFUNDED" as const,
+      orderStatus: "REFUNDED" as const,
+      captureId: payment.transactionId ?? null,
+      amount: toDisplayAmount(payment.amount.total, payment.currency),
+      currency: payment.currency,
+      receiptUrl: payment.receiptUrl ?? null
+    };
+  }
+
+  const nextAttemptStatus = payment.status === "PAY_PENDING" ? "APPROVED" : "APPROVAL_READY";
+  await updatePaymentAttempt(input.attempt.id, {
+    providerCaptureId: payment.transactionId ?? null,
+    status: nextAttemptStatus,
+    lastEventId: providerEventId,
+    updatedAt: now
+  });
+  await updateOrderStatus(input.attempt.orderId, "PAYMENT_PENDING", input.attempt.id);
+  await log("payment_attempt", input.attempt.id, "PENDING", "PortOne payment is still pending confirmation.", {
+    source: input.source,
+    paymentStatus: payment.status
+  });
+
+  return {
+    ok: true as const,
+    provider: "portone" as const,
+    paymentStatus: payment.status,
+    attemptStatus: nextAttemptStatus,
+    orderStatus: "PAYMENT_PENDING" as const,
+    captureId: payment.transactionId ?? null,
+    amount: toDisplayAmount(payment.amount.total, payment.currency),
+    currency: payment.currency,
+    receiptUrl: null
+  };
+}
+
 app.use(
   "/api/*",
   cors({
@@ -335,9 +633,14 @@ app.get("/", (c) =>
     ok: true,
     service: "pay-to-minwoo-payment-core",
     runtime: "nodejs-vercel",
-    mode: "paypal-live-only",
+    stage: currentAppStage(),
+    mode: currentMode(),
     frontendBaseUrl: currentFrontendBaseUrl(),
     backendBaseUrl: currentBackendBaseUrl(),
+    enabledProviders: {
+      paypal: true,
+      portoneDomesticTest: isPortOneDomesticEnabled() && isPortOneConfigured()
+    },
     domains: ["Order", "PaymentAttempt", "ProviderEvent", "SettlementRecord", "LedgerEntry", "AuditLog", "IdempotencyRecord"]
   })
 );
@@ -347,10 +650,12 @@ app.get("/api/v1/health", (c) =>
     ok: true,
     service: "pay-to-minwoo-payment-core",
     runtime: "nodejs-vercel",
-    mode: "paypal-live-only",
+    stage: currentAppStage(),
+    mode: currentMode(),
     frontendBaseUrl: currentFrontendBaseUrl(),
     backendBaseUrl: currentBackendBaseUrl(),
     paypalEnvironment: process.env.PAYPAL_ENV?.trim().toLowerCase() === "live" ? "live" : "sandbox",
+    portoneDomesticEnabled: isPortOneDomesticEnabled() && isPortOneConfigured(),
     now: nowIso()
   })
 );
@@ -485,6 +790,124 @@ app.post("/api/v1/orders/:orderId/payment-attempts/paypal", async (c) => {
   return c.json({ ok: true, replayed: false, orderId: order.id, attempt, redirectUrl: approveUrl }, 201);
 });
 
+app.post("/api/v1/orders/:orderId/payment-attempts/portone", async (c) => {
+  if (!isPortOneDomesticEnabled()) {
+    return c.json({ message: "PortOne domestic test checkout is disabled in this environment." }, 404);
+  }
+
+  if (!isPortOneConfigured()) {
+    return c.json({ message: "PortOne credentials are not configured." }, 500);
+  }
+
+  const orderId = c.req.param("orderId");
+  const order = await getOrderById(orderId);
+  if (!order) {
+    return c.json({ message: "Order not found." }, 404);
+  }
+
+  if (order.region !== "domestic" || order.currency !== "KRW") {
+    return c.json({ message: "PortOne domestic test checkout currently supports domestic KRW orders only." }, 400);
+  }
+
+  const body = (await c.req.json().catch(() => ({}))) as CreatePortOneAttemptBody;
+  const payMethod = normalizePortOnePayMethod(body.payMethod);
+  const idempotencyKey = c.req.header("idempotency-key")?.trim() || makeId("portone_req");
+  const existingRecord = await findIdempotencyRecord("portone.payment.create", idempotencyKey);
+  if (existingRecord) {
+    const existingAttempt = await getPaymentAttemptById(existingRecord.resourceId);
+    if (existingAttempt) {
+      const credentials = getPortOneCredentials();
+      return c.json({
+        ok: true,
+        replayed: true,
+        orderId,
+        attempt: existingAttempt,
+        paymentRequest: {
+          storeId: credentials.storeId,
+          channelKey: credentials.channelKey,
+          paymentId: existingAttempt.providerOrderId,
+          orderName: order.itemName,
+          totalAmount: order.amount,
+          currency: order.currency,
+          payMethod,
+          redirectUrl: `${currentFrontendBaseUrl()}/portone/redirect?orderId=${encodeURIComponent(order.id)}&attemptId=${encodeURIComponent(existingAttempt.id)}`,
+          noticeUrls: [`${currentBackendBaseUrl()}/api/v1/webhooks/portone`],
+          locale: "KO_KR",
+          country: "KR",
+          customData: { orderId: order.id, attemptId: existingAttempt.id, region: order.region }
+        }
+      });
+    }
+  }
+
+  const credentials = getPortOneCredentials();
+  const createdAt = nowIso();
+  const attemptId = makeId("attempt");
+  const paymentId = attemptId;
+  const redirectUrl = `${currentFrontendBaseUrl()}/portone/redirect?orderId=${encodeURIComponent(order.id)}&attemptId=${encodeURIComponent(attemptId)}`;
+  const paymentRequest = {
+    storeId: credentials.storeId,
+    channelKey: credentials.channelKey,
+    paymentId,
+    orderName: order.itemName,
+    totalAmount: order.amount,
+    currency: order.currency,
+    payMethod,
+    redirectUrl,
+    noticeUrls: [`${currentBackendBaseUrl()}/api/v1/webhooks/portone`],
+    locale: "KO_KR",
+    country: "KR",
+    customData: {
+      orderId: order.id,
+      attemptId,
+      region: order.region,
+      note: order.note
+    }
+  };
+  const attempt = {
+    id: attemptId,
+    orderId: order.id,
+    provider: "portone",
+    providerOrderId: paymentId,
+    providerCaptureId: null,
+    status: "APPROVAL_READY" as const,
+    checkoutUrl: "portone://browser-sdk",
+    amount: order.amount,
+    currency: order.currency,
+    createdAt,
+    updatedAt: createdAt
+  };
+
+  await insertPaymentAttempt(attempt);
+  await insertIdempotencyRecord({
+    id: makeId("idemrec"),
+    scope: "portone.payment.create",
+    key: idempotencyKey,
+    resourceType: "payment_attempt",
+    resourceId: attempt.id,
+    createdAt
+  });
+  await insertProviderEvent({
+    id: makeId("event"),
+    provider: "portone",
+    providerEventId: paymentId,
+    eventType: "PAYMENT.REQUEST_PREPARED",
+    source: "api",
+    orderId: order.id,
+    attemptId: attempt.id,
+    signatureVerified: true,
+    payload: paymentRequest,
+    receivedAt: createdAt
+  });
+  await updateOrderStatus(order.id, "PAYMENT_PENDING", attempt.id);
+  await log("payment_attempt", attempt.id, "APPROVAL_READY", "PortOne browser payment request was prepared.", {
+    payMethod,
+    paymentId
+  });
+
+  return c.json({ ok: true, replayed: false, orderId: order.id, attempt, paymentRequest }, 201);
+});
+
 app.get("/api/v1/orders/:orderId", async (c) => {
   const order = await getOrderById(c.req.param("orderId"));
   if (!order) {
@@ -501,6 +924,87 @@ app.get("/api/v1/payment-attempts/:attemptId", async (c) => {
   }
 
   return c.json({ ok: true, attempt });
+});
+
+app.post("/api/v1/orders/:orderId/payment-attempts/:attemptId/portone/complete", async (c) => {
+  if (!isPortOneDomesticEnabled()) {
+    return c.json({ message: "PortOne domestic test checkout is disabled in this environment." }, 404);
+  }
+
+  if (!isPortOneConfigured()) {
+    return c.json({ message: "PortOne credentials are not configured." }, 500);
+  }
+
+  const orderId = c.req.param("orderId");
+  const attemptId = c.req.param("attemptId");
+  const [order, attempt] = await Promise.all([getOrderById(orderId), getPaymentAttemptById(attemptId)]);
+
+  if (!order) {
+    return c.json({ message: "Order not found." }, 404);
+  }
+
+  if (!attempt || attempt.orderId !== order.id || attempt.provider !== "portone") {
+    return c.json({ message: "PortOne payment attempt not found." }, 404);
+  }
+
+  const body = (await c.req.json().catch(() => ({}))) as CompletePortOneAttemptBody;
+  if (body.errorCode || body.errorMessage) {
+    const receivedAt = nowIso();
+    const providerEventId = makeProviderEventId(attempt.providerOrderId, "CLIENT_FAILED", receivedAt);
+
+    await updatePaymentAttempt(attempt.id, {
+      status: "FAILED",
+      lastEventId: providerEventId,
+      updatedAt: receivedAt
+    });
+    await updateOrderStatus(order.id, "FAILED", attempt.id);
+    await log("payment_attempt", attempt.id, "FAILED", "PortOne payment failed before server verification.", {
+      errorCode: body.errorCode ?? null,
+      errorMessage: body.errorMessage ?? null,
+      pgCode: body.pgCode ?? null,
+      pgMessage: body.pgMessage ?? null
+    });
+
+    return c.json({
+      ok: true,
+      provider: "portone",
+      paymentStatus: "FAILED",
+      attemptStatus: "FAILED",
+      orderStatus: "FAILED",
+      captureId: null,
+      amount: toDisplayAmount(order.amount, order.currency),
+      currency: order.currency,
+      receiptUrl: null
+    });
+  }
+
+  const paymentId = body.paymentId?.trim() || attempt.providerOrderId;
+  if (paymentId !== attempt.providerOrderId) {
+    return c.json({ message: "paymentId does not match the stored PortOne payment attempt." }, 400);
+  }
+
+  const credentials = getPortOneCredentials();
+  try {
+    const payment = await getPortOnePayment(credentials, paymentId);
+    const result = await syncPortOneAttempt({ attempt, payment, source: "sync" });
+    return c.json(result);
+  } catch (error) {
+    await updatePaymentAttempt(attempt.id, { status: "FAILED", updatedAt: nowIso() });
+    await updateOrderStatus(order.id, "FAILED", attempt.id);
+    await log("payment_attempt", attempt.id, "VERIFY_FAILED", "PortOne payment verification failed.", {
+      paymentId,
+      message: error instanceof Error ? error.message : String(error)
+    });
+
+    return c.json(
+      {
+        message: "PortOne payment verification failed.",
+        paymentId,
+        detail: error instanceof Error ? error.message : String(error)
+      },
+      502
+    );
+  }
 });
 
 app.get("/paypal/return", async (c) => {
@@ -626,6 +1130,81 @@ app.post("/api/v1/webhooks/paypal", async (c) => {
   return c.json({ ok: true, eventType, providerEventId, attemptId: attempt.id, orderId: attempt.orderId });
 });
 
+app.post("/api/v1/webhooks/portone", async (c) => {
+  if (!isPortOneConfigured()) {
+    return c.json({ message: "PortOne credentials are not configured." }, 500);
+  }
+
+  const credentials = getPortOneCredentials();
+  if (!credentials.webhookSecret) {
+    return c.json({ message: "PORTONE_WEBHOOK_SECRET is not configured." }, 500);
+  }
+
+  const headers = getPortOneWebhookHeaders(c.req.raw.headers);
+  if (!headers) {
+    return c.json({ message: "PortOne webhook signature headers are missing." }, 400);
+  }
+
+  const rawBody = await c.req.text();
+  let webhook: Awaited<ReturnType<typeof verifyPortOneWebhook>>;
+
+  try {
+    webhook = await verifyPortOneWebhook({
+      webhookSecret: credentials.webhookSecret,
+      payload: rawBody,
+      headers
+    });
+  } catch (error) {
+    return c.json(
+      {
+        message: "PortOne webhook verification failed.",
+        detail: error instanceof Error ? error.message : String(error)
+      },
+      401
+    );
+  }
+
+  if (!("type" in webhook) || !("data" in webhook) || !webhook.data || typeof webhook.data !== "object" || !("paymentId" in webhook.data)) {
+    return c.json({ ok: true, ignored: true, reason: "unsupported_webhook_shape" });
+  }
+
+  const paymentId = String((webhook.data as { paymentId: string }).paymentId);
+  const attempt = await getPaymentAttemptByProviderOrderId(paymentId);
+  const receivedAt = nowIso();
+
+  await insertProviderEvent({
+    id: makeId("event"),
+    provider: "portone",
+    providerEventId: makeProviderEventId(paymentId, webhook.type, webhook.timestamp),
+    eventType: webhook.type,
+    source: "webhook",
+    orderId: attempt?.orderId ?? null,
+    attemptId: attempt?.id ?? null,
+    signatureVerified: true,
+    payload: webhook,
+    receivedAt
+  });
+
+  if (!attempt) {
+    return c.json({ ok: true, ignored: true, reason: "attempt_not_found", paymentId, eventType: webhook.type });
+  }
+
+  if (webhook.type === "Transaction.Paid" || webhook.type === "Transaction.Failed" || webhook.type === "Transaction.Cancelled") {
+    const payment = await getPortOnePayment(credentials, paymentId);
+    const result = await syncPortOneAttempt({
+      attempt,
+      payment,
+      source: "webhook",
+      eventId: makeProviderEventId(paymentId, webhook.type, webhook.timestamp),
+      signatureVerified: true
+    });
+
+    return c.json({ ok: true, paymentId, eventType: webhook.type, attemptId: attempt.id, orderId: attempt.orderId, result });
+  }
+
+  return c.json({ ok: true, paymentId, eventType: webhook.type, attemptId: attempt.id, orderId: attempt.orderId });
+});
+
 app.get("/api/v1/admin/dashboard", async (c) => {
   const limit = Math.min(Number(c.req.query("limit") ?? "20"), 100);
   const [orderCount, paymentAttemptCount, orders, attempts] = await Promise.all([
@@ -637,7 +1216,8 @@ app.get("/api/v1/admin/dashboard", async (c) => {
 
   return c.json({
     ok: true,
-    mode: "paypal-live-only",
+    stage: currentAppStage(),
+    mode: currentMode(),
     now: nowIso(),
     totals: {
       orders: orderCount,

@@ -17,10 +17,20 @@ function formatAmount(currency: string, rawAmount: string) {
   });
 }
 
+function providerLabel(provider: string) {
+  if (provider === "portone") {
+    return "PortOne / KG Inicis test";
+  }
+
+  return "PayPal";
+}
+
 export function SuccessPage({ copy }: SuccessPageProps) {
   const [params] = useSearchParams();
   const amount = params.get("amount") ?? "0";
   const currency = params.get("currency") ?? "USD";
+  const provider = params.get("provider") ?? "paypal";
+  const receiptUrl = params.get("receiptUrl") ?? "";
 
   return (
     <>
@@ -34,6 +44,7 @@ export function SuccessPage({ copy }: SuccessPageProps) {
 
         <div className="space-y-4 mb-10">
           <h2 className="font-headline font-extrabold text-4xl tracking-tight text-on-background">{copy.successTitle}</h2>
+          <p className="text-sm uppercase tracking-[0.2em] font-semibold text-on-surface-variant">{providerLabel(provider)}</p>
         </div>
 
         <div className="w-full mb-12">
@@ -51,10 +62,17 @@ export function SuccessPage({ copy }: SuccessPageProps) {
           <Link className="block w-full py-5 signature-gradient text-white font-headline font-bold rounded-full text-lg shadow-xl hover:shadow-2xl transition-all duration-300 active:scale-95 no-underline text-center" to="/">
             {copy.successDone}
           </Link>
-          <button className="w-full py-5 bg-secondary-container text-on-secondary-container font-headline font-bold rounded-xl text-lg hover:bg-secondary-fixed-dim transition-all duration-300 active:scale-95 flex items-center justify-center gap-2" type="button">
-            <span className="material-symbols-outlined">receipt_long</span>
-            {copy.successReceipt}
-          </button>
+          {receiptUrl ? (
+            <a className="w-full py-5 bg-secondary-container text-on-secondary-container font-headline font-bold rounded-xl text-lg hover:bg-secondary-fixed-dim transition-all duration-300 active:scale-95 flex items-center justify-center gap-2 no-underline" href={receiptUrl} rel="noreferrer" target="_blank">
+              <span className="material-symbols-outlined">receipt_long</span>
+              {copy.successReceipt}
+            </a>
+          ) : (
+            <button className="w-full py-5 bg-secondary-container/60 text-on-secondary-container/70 font-headline font-bold rounded-xl text-lg flex items-center justify-center gap-2 cursor-not-allowed" disabled type="button">
+              <span className="material-symbols-outlined">receipt_long</span>
+              {copy.successReceipt}
+            </button>
+          )}
         </div>
       </main>
 

@@ -1,11 +1,23 @@
-import { Link } from "react-router-dom";
+import { Link, useSearchParams } from "react-router-dom";
 import type { Copy } from "../lib/content";
 
 type CancelPageProps = {
   copy: Copy;
 };
 
+function providerLabel(provider: string) {
+  if (provider === "portone") {
+    return "PortOne / KG Inicis test";
+  }
+
+  return "PayPal";
+}
+
 export function CancelPage({ copy }: CancelPageProps) {
+  const [params] = useSearchParams();
+  const provider = params.get("provider") ?? "paypal";
+  const reason = params.get("reason") ?? "unknown";
+
   return (
     <main className="w-full max-w-md px-6 py-12 flex flex-col items-center mx-auto">
       <div className="mb-10 relative">
@@ -17,6 +29,7 @@ export function CancelPage({ copy }: CancelPageProps) {
 
       <div className="text-center mb-10">
         <h1 className="font-headline text-on-surface text-[2rem] font-extrabold tracking-tight mb-3">{copy.cancelTitle}</h1>
+        <p className="text-sm uppercase tracking-[0.2em] font-semibold text-on-surface-variant">{providerLabel(provider)}</p>
       </div>
 
       <div className="w-full space-y-3">
@@ -25,7 +38,7 @@ export function CancelPage({ copy }: CancelPageProps) {
             <span className="material-symbols-outlined text-[20px]">info</span>
           </div>
           <div className="text-sm font-body text-on-surface-variant leading-snug">
-            <span className="font-semibold text-on-surface">Declined by provider.</span> Your payment was not completed and nothing was captured.
+            <span className="font-semibold text-on-surface">{copy.cancelBody}</span> reason: {reason}
           </div>
         </div>
       </div>
@@ -37,12 +50,6 @@ export function CancelPage({ copy }: CancelPageProps) {
         <Link className="bg-secondary-container text-on-secondary-container font-headline font-bold py-4 rounded-full w-full transition-all duration-300 active:scale-[0.98] border border-outline-variant/50 text-center no-underline" to="/">
           {copy.backHome}
         </Link>
-      </div>
-
-      <div className="mt-8">
-        <button className="text-primary font-body font-semibold text-sm hover:underline transition-all" type="button">
-          Contact Support
-        </button>
       </div>
     </main>
   );

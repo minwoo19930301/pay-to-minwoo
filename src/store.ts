@@ -434,7 +434,7 @@ function snakeToCamel(value: string) {
 function mapGenericRow(row: Record<string, unknown>, columns: string[]) {
   return Object.fromEntries(
     columns.map((column) => [snakeToCamel(column), row[column] === null || row[column] === undefined ? null : row[column]])
-  );
+  ) as Record<string, unknown>;
 }
 
 function parsePayload(value: unknown) {
