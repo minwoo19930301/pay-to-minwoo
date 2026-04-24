@@ -1,0 +1,16 @@
+{
+  "projectId": "prj_YcQYpQwztk8sPcziLncR4KfGxGUI",
+  "orgId": "team_JGxi56tmUPTptgI1nVrQqNkr",
+  "projectName": "pay-to-minwoo",
+  "settings": {
+    "createdAt": 1775928534790,
+    "framework": "hono",
+    "devCommand": null,
+    "installCommand": null,
+    "buildCommand": null,
+    "outputDirectory": null,
+    "rootDirectory": null,
+    "directoryListing": false,
+    "nodeVersion": "24.x"
+  }
+}

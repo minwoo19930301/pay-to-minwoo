@@ -1,0 +1,16 @@
+{
+  "name": "pay-to-minwoo-workspace",
+  "private": true,
+  "dependencies": {
+    "@libsql/client": "^0.15.15",
+    "@portone/server-sdk": "^0.19.0",
+    "hono": "^4.9.6"
+  },
+  "scripts": {
+    "dev:frontend": "npm --prefix frontend run dev",
+    "build:frontend": "npm --prefix frontend run build",
+    "dev:backend": "bash -lc 'set -a; [ -f .env.local ] && source ./.env.local; set +a; npx vercel dev --listen 3000'",
+    "deploy:backend": "npx vercel --prod --yes",
+    "verify": "npm --prefix frontend run build"
+  }
+}

@@ -1,0 +1,91 @@
+<!doctype html>
+<html class="light" lang="en">
+  <head>
+    <meta charset="UTF-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+    <title>Pay to Minwoo</title>
+    <meta name="description" content="Pay to Minwoo donation frontend" />
+    <script src="https://cdn.tailwindcss.com?plugins=forms,container-queries"></script>
+    <link
+      href="https://fonts.googleapis.com/css2?family=Manrope:wght@400;700;800&family=Inter:wght@400;500;600&family=Material+Symbols+Outlined:wght,FILL@100..700,0..1&display=swap"
+      rel="stylesheet"
+    />
+    <script>
+      tailwind.config = {
+        darkMode: 'class',
+        theme: {
+          extend: {
+            colors: {
+              'on-tertiary': '#e0f2fe',
+              'tertiary-fixed-dim': '#7dd3fc',
+              'on-primary-fixed': '#000000',
+              'surface-container-low': '#f0f9ff',
+              'on-secondary-fixed-variant': '#334155',
+              background: '#f8fafc',
+              secondary: '#475569',
+              'tertiary-fixed': '#bae6fd',
+              'outline-variant': '#cbd5e1',
+              'error-dim': '#a70138',
+              'on-background': '#0f172a',
+              tertiary: '#0369a1',
+              'on-primary-fixed-variant': '#00207e',
+              'on-secondary': '#f8fafc',
+              'primary-fixed': '#bfdbfe',
+              'inverse-surface': '#020617',
+              'on-primary': '#f8fafc',
+              'primary-dim': '#003cd3',
+              'on-tertiary-fixed-variant': '#075985',
+              'on-tertiary-fixed': '#082f49',
+              'on-tertiary-container': '#0c4a6e',
+              'on-primary-container': '#001867',
+              'tertiary-container': '#bae6fd',
+              'surface-bright': '#f8fafc',
+              'surface-tint': '#1849e5',
+              'surface-container-high': '#f1f5f9',
+              'surface-dim': '#e2e8f0',
+              'surface-container': '#f1f5f9',
+              'inverse-on-surface': '#94a3b8',
+              'surface-container-lowest': '#ffffff',
+              error: '#dc2626',
+              outline: '#64748b',
+              primary: '#1849e5',
+              'secondary-fixed-dim': '#94a3b8',
+              'on-error': '#ffefef',
+              'inverse-primary': '#6d88ff',
+              'secondary-fixed': '#e2e8f0',
+              'secondary-dim': '#475569',
+              'on-secondary-container': '#1e293b',
+              'secondary-container': '#e2e8f0',
+              surface: '#f8fafc',
+              'on-surface-variant': '#475569',
+              'tertiary-dim': '#0c4a6e',
+              'on-surface': '#0f172a',
+              'error-container': '#fee2e2',
+              'primary-fixed-dim': '#718bff',
+              'primary-container': '#dbeafe',
+              'surface-container-highest': '#e2e8f0',
+              'on-error-container': '#7f1d1d',
+              'on-secondary-fixed': '#0f172a',
+              'surface-variant': '#e2e8f0'
+            },
+            borderRadius: {
+              DEFAULT: '0.25rem',
+              lg: '0.5rem',
+              xl: '0.75rem',
+              full: '9999px'
+            },
+            fontFamily: {
+              headline: ['Manrope'],
+              body: ['Inter'],
+              label: ['Inter']
+            }
+          }
+        }
+      };
+    </script>
+  </head>
+  <body>
+    <div id="root"></div>
+    <script type="module" src="/src/main.tsx"></script>
+  </body>
+</html>

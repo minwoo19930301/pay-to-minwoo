@@ -1,0 +1,14 @@
+{
+  "handler": "src/index.js",
+  "runtime": "nodejs24.x",
+  "architecture": "arm64",
+  "environment": {},
+  "framework": {
+    "slug": "hono"
+  },
+  "shouldDisableAutomaticFetchInstrumentation": false,
+  "launcherType": "Nodejs",
+  "shouldAddHelpers": true,
+  "shouldAddSourcemapSupport": true,
+  "awsLambdaHandler": ""
+}

@@ -1,0 +1,43 @@
+html,
+body,
+#root {
+  min-height: 100%;
+}
+
+* {
+  box-sizing: border-box;
+}
+
+body {
+  margin: 0;
+  min-height: max(884px, 100dvh);
+  font-family: 'Inter', sans-serif;
+}
+
+h1,
+h2,
+h3 {
+  font-family: 'Manrope', sans-serif;
+}
+
+button,
+input,
+textarea {
+  font: inherit;
+}
+
+button {
+  cursor: pointer;
+}
+
+.material-symbols-outlined {
+  font-variation-settings: 'FILL' 0, 'wght' 400, 'GRAD' 0, 'opsz' 24;
+}
+
+.signature-gradient {
+  background: linear-gradient(135deg, #1849e5 0%, #3b82f6 100%);
+}
+
+.fluid-bg {
+  background: radial-gradient(circle at top right, #f0f9ff 0%, #f8fafc 100%);
+}
