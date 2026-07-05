@@ -112,7 +112,7 @@ function allowedOrigins() {
   const configuredOrigins = process.env.CORS_ALLOWED_ORIGINS?.trim();
   return (
     configuredOrigins ??
-    "http://localhost:5173,http://127.0.0.1:5173,http://localhost:4173,https://pay-to-minwoo-web.netlify.app,https://pay-to-minwoo.netlify.app"
+    "http://localhost:5173,http://127.0.0.1:5173,http://localhost:4173,https://pay-to-minwoo-web.netlify.app,https://pay-to-minwoo.netlify.app,https://ai-ing.org,https://www.ai-ing.org"
   )
     .split(",")
     .map((item) => item.trim())
@@ -776,6 +776,77 @@ app.post("/api/v1/orders/:orderId/payment-attempts/paypal", async (c) => {
   await log("payment_attempt", attempt.id, "APPROVAL_READY", "PayPal order was created.", { providerOrderId: paypalOrder.id });
 
   return c.json({ ok: true, replayed: false, orderId: order.id, attempt, redirectUrl: approveUrl }, 201);
+});
+
+app.post("/api/v1/orders/:orderId/payment-attempts/portone", async (c) => {
+  const orderId = c.req.param("orderId");
+  const body = (await c.req.json()) as { paymentId: string; txId: string; method: string };
+  const order = await getOrderById(orderId);
+
+  if (!order) {
+    return c.json({ message: "Order not found." }, 404);
+  }
+
+  const attemptId = makeId("attempt");
+  const createdAt = nowIso();
+
+  const attempt = {
+    id: attemptId,
+    orderId: order.id,
+    provider: "portone",
+    providerOrderId: body.paymentId,
+    providerCaptureId: body.txId || null,
+    status: "CAPTURED" as const,
+    checkoutUrl: "",
+    amount: order.amount,
+    currency: order.currency,
+    createdAt,
+    updatedAt: createdAt
+  };
+
+  await insertPaymentAttempt(attempt);
+
+  // Update order status to PAID
+  await updateOrderStatus(order.id, "PAID", attempt.id);
+
+  // Insert Settlement Record
+  const settlementId = makeId("settlement");
+  await insertSettlementRecord({
+    id: settlementId,
+    attemptId: attempt.id,
+    orderId: order.id,
+    currency: order.currency,
+    grossAmount: order.amount,
+    feeAmount: 0,
+    netAmount: order.amount,
+    status: "SETTLED",
+    payoutReference: body.txId || null,
+    createdAt,
+    updatedAt: createdAt,
+    paidOutAt: null
+  });
+
+  // Ledger entries
+  await insertLedgerEntry({
+    id: makeId("ledger"),
+    orderId: order.id,
+    attemptId: attempt.id,
+    settlementId,
+    type: "payment_captured",
+    amount: order.amount,
+    currency: order.currency,
+    direction: "credit",
+    createdAt,
+    metadata: { provider: "portone", method: body.method, txId: body.txId }
+  });
+
+  await log("payment_attempt", attempt.id, "CAPTURED", `PortOne (${body.method}) capture was recorded.`, {
+    txId: body.txId,
+    amount: order.amount,
+    currency: order.currency
+  });
+
+  return c.json({ ok: true, attemptId: attempt.id });
 });
 
 app.get("/api/v1/orders/:orderId", async (c) => {
