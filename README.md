@@ -1,6 +1,11 @@
-# pay-to-minwoo
+# Pay to Minwoo
 
-`pay-to-minwoo`는 단순 mock 도네이션 페이지가 아니라 실제 PayPal hosted checkout을 붙인 API-first 결제 코어다.
+[![License: MIT](https://img.shields.io/badge/License-MIT-yellow.svg)](LICENSE)
+[![Hono](https://img.shields.io/badge/Hono-E36002?style=flat&logo=hono&logoColor=white)](https://hono.dev/)
+[![PayPal](https://img.shields.io/badge/PayPal-003087?style=flat&logo=paypal&logoColor=white)](https://developer.paypal.com/)
+[![GitHub stars](https://img.shields.io/github/stars/minwoo19930301/pay-to-minwoo?style=social)](https://github.com/minwoo19930301/pay-to-minwoo/stargazers)
+
+`pay-to-minwoo`는 단순 mock 도네이션 페이지가 아니라 실제 PayPal hosted checkout과 PortOne V2를 붙인 API-first 결제 코어다.
 
 기준은 아래처럼 고정한다.
 

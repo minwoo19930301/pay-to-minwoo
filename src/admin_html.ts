@@ -138,18 +138,8 @@ export const adminHtml = `<!DOCTYPE html>
   }
 </style>
 </head>
-<body>
-
-<!-- Password Authentication Modal -->
-<div id="auth-modal" class="auth-overlay">
-  <div class="auth-box">
-    <div style="font-size: 36px; margin-bottom: 12px;">🔐</div>
-    <h2>Turso DB Admin Login</h2>
-    <p>Turso 데이터베이스 대장 관리를 위한 암호를 입력하세요.</p>
-    <input type="password" id="admin-pass-input" class="input-field" placeholder="Admin Password" onkeyup="if(event.key==='Enter') login()">
-    <button class="btn btn-primary" style="width: 100%; padding: 12px;" onclick="login()">로그인</button>
-  </div>
-</div>
+<!-- Password Authentication Modal (Removed Server-Side Guard bypass) -->
+<div id="auth-modal" class="auth-overlay" style="display:none;"></div>
 
 <!-- Header Navbar -->
 <nav class="navbar">
@@ -162,7 +152,6 @@ export const adminHtml = `<!DOCTYPE html>
       <span style="width: 8px; height: 8px; background: var(--success); border-radius: 50%;"></span> Turso DB Live
     </span>
     <button class="btn" onclick="fetchDashboard()">🔄 새로고침</button>
-    <button class="btn" onclick="logout()">로그아웃</button>
   </div>
 </nav>
 
@@ -182,7 +171,7 @@ export const adminHtml = `<!DOCTYPE html>
     </div>
     <div class="kpi-card">
       <div class="kpi-title">백엔드 작동 모드</div>
-      <div class="kpi-value" style="font-size: 20px; color: var(--accent);" id="kpi-mode">PayPal Live</div>
+      <div class="kpi-value" style="font-size: 20px; color: var(--accent);" id="kpi-mode">PortOne & PayPal</div>
       <div class="kpi-sub" style="color: var(--text-sub);" id="kpi-backend-url">Vercel Backend</div>
     </div>
   </div>
@@ -232,34 +221,24 @@ export const adminHtml = `<!DOCTYPE html>
 </div>
 
 <script>
-  let adminPassword = localStorage.getItem('turso_admin_pass') || '';
+  let adminPassword = '';
   const backendBaseUrl = window.location.origin;
   let currentTab = 'dashboard';
   let currentPage = 1;
   let rawData = [];
 
   function checkAuth() {
-    if (adminPassword) {
-      document.getElementById('auth-modal').style.display = 'none';
-      fetchDashboard();
-    } else {
-      document.getElementById('auth-modal').style.display = 'flex';
-    }
-  }
-
-  function login() {
-    const input = document.getElementById('admin-pass-input').value.trim();
-    if (!input) return alert('암호를 입력해 주세요.');
-    adminPassword = input;
-    localStorage.setItem('turso_admin_pass', input);
+    // 서버사이드 게이트웨이 인증을 이미 통과했으므로 모달 생략 및 즉시 쿼리
     document.getElementById('auth-modal').style.display = 'none';
     fetchDashboard();
   }
 
+  function login() {
+    fetchDashboard();
+  }
+
   function logout() {
-    localStorage.removeItem('turso_admin_pass');
-    adminPassword = '';
-    document.getElementById('auth-modal').style.display = 'flex';
+    window.location.href = "/";
   }
 
   async function fetchDashboard() {

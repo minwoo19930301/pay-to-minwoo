@@ -614,6 +614,15 @@ app.use("/api/v1/admin/*", async (c, next) => {
     return;
   }
 
+  // Allow verified cookie session to bypass header password check
+  const cookieHeader = c.req.header("Cookie") || "";
+  const isAuthenticated = cookieHeader.includes("payment-auth=verified");
+
+  if (isAuthenticated) {
+    await next();
+    return;
+  }
+
   const password = c.req.header("x-admin-password")?.trim();
 
   if (password !== currentAdminPassword()) {
@@ -628,7 +637,7 @@ app.get("/", (c) =>
     ok: true,
     service: "pay-to-minwoo-payment-core",
     runtime: "nodejs-vercel",
-    mode: "paypal-live-only",
+    mode: "PortOne & PayPal",
     frontendBaseUrl: currentFrontendBaseUrl(),
     backendBaseUrl: currentBackendBaseUrl(),
     domains: ["Order", "PaymentAttempt", "ProviderEvent", "SettlementRecord", "LedgerEntry", "AuditLog", "IdempotencyRecord"]
@@ -640,7 +649,7 @@ app.get("/api/v1/health", (c) =>
     ok: true,
     service: "pay-to-minwoo-payment-core",
     runtime: "nodejs-vercel",
-    mode: "paypal-live-only",
+    mode: "PortOne & PayPal",
     frontendBaseUrl: currentFrontendBaseUrl(),
     backendBaseUrl: currentBackendBaseUrl(),
     paypalEnvironment: process.env.PAYPAL_ENV?.trim().toLowerCase() === "live" ? "live" : "sandbox",
@@ -1001,7 +1010,7 @@ app.get("/api/v1/admin/dashboard", async (c) => {
 
   return c.json({
     ok: true,
-    mode: "paypal-live-only",
+    mode: "PortOne & PayPal",
     now: nowIso(),
     totals: {
       orders: orderCount,
