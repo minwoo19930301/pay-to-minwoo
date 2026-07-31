@@ -50,39 +50,7 @@ type CreateOrderBody = Partial<{
   region: Region;
   itemName: string;
   idempotencyKey: string;
-  productCode: string;
-  customer: { fullName?: string; email?: string; phoneNumber?: string };
 }>;
-
-/**
- * ai-ing.org 판매 상품 카탈로그 (서버 권한 소스).
- * productCode가 오면 클라이언트가 보낸 amount/itemName은 무시하고 이 표의 값을 사용한다.
- * → 프론트엔드 조작으로 50만원 상품을 100원에 결제하는 것을 차단.
- * productCode가 없으면 기존 기부(pay-to-minwoo) 흐름을 그대로 유지한다.
- */
-const AI_ING_PRODUCT_CATALOG: Record<string, { amount: number; currency: string; itemName: string }> = {
-  pdf: { amount: 10000, currency: "KRW", itemName: "온라인 PDF 교재" },
-  consult: {
-    amount: 50000,
-    currency: "KRW",
-    itemName: "AX 맞춤형 컨설팅 & 1:1 멘토링 1시간 서비스"
-  },
-  consult100k: {
-    amount: 100000,
-    currency: "KRW",
-    itemName: "AX 맞춤형 컨설팅 & 실습 2시간 과정"
-  },
-  consult200k: {
-    amount: 200000,
-    currency: "KRW",
-    itemName: "AX 맞춤형 컨설팅 & 프로젝트 1개월 집중 과정"
-  },
-  consult500k: {
-    amount: 500000,
-    currency: "KRW",
-    itemName: "AX 맞춤형 기업 컨설팅 & 1:1 멘토링 3개월 패키지"
-  }
-};
 
 const app = new Hono();
 const PAYPAL_SUPPORTED_CURRENCIES = new Set([
@@ -161,63 +129,6 @@ function toMinorUnits(amount: number, currency: string) {
 
 function toDisplayAmount(amount: number, currency: string) {
   return (amount / 10 ** decimalPlaces(currency)).toFixed(decimalPlaces(currency));
-}
-
-/**
- * PortOne V2 결제 서버 검증.
- * 클라이언트가 "결제 성공"이라고 알려준 것만 믿고 주문을 PAID로 바꾸면
- * 누구나 이 엔드포인트를 호출해 무료로 결제 완료 기록을 만들 수 있다.
- * PORTONE_API_SECRET 이 설정된 경우 실제 결제 상태와 금액을 대조한다.
- */
-async function verifyPortOnePayment(
-  paymentId: string,
-  expectedAmount: number,
-  expectedCurrency: string
-): Promise<{ verified: boolean; reason: string }> {
-  const secret = process.env.PORTONE_API_SECRET?.trim();
-
-  if (!secret) {
-    // 검증 키가 없으면 통과시키되(기존 동작 유지) 반드시 경고를 남긴다.
-    console.warn(
-      "[portone] PORTONE_API_SECRET is not configured — payment recorded WITHOUT server-side verification."
-    );
-    return { verified: false, reason: "verification_skipped_no_secret" };
-  }
-
-  try {
-    const res = await fetch(`https://api.portone.io/payments/${encodeURIComponent(paymentId)}`, {
-      headers: { Authorization: `PortOne ${secret}` }
-    });
-
-    if (!res.ok) {
-      return { verified: false, reason: `portone_lookup_failed_${res.status}` };
-    }
-
-    const payment = (await res.json()) as {
-      status?: string;
-      currency?: string;
-      amount?: { total?: number };
-    };
-
-    if (payment.status !== "PAID") {
-      return { verified: false, reason: `unexpected_status_${payment.status ?? "unknown"}` };
-    }
-
-    const paidTotal = payment.amount?.total;
-    if (typeof paidTotal !== "number" || paidTotal !== expectedAmount) {
-      return { verified: false, reason: `amount_mismatch_${paidTotal ?? "none"}_vs_${expectedAmount}` };
-    }
-
-    const paidCurrency = (payment.currency ?? "").replace(/^CURRENCY_/, "").toUpperCase();
-    if (paidCurrency && paidCurrency !== expectedCurrency.toUpperCase()) {
-      return { verified: false, reason: `currency_mismatch_${paidCurrency}_vs_${expectedCurrency}` };
-    }
-
-    return { verified: true, reason: "ok" };
-  } catch (error) {
-    console.error("[portone] verification request failed", error);
-    return { verified: false, reason: "verification_request_error" };
-  }
 }
 
 function successUrl(params: Record<string, string>) {
@@ -749,17 +660,7 @@ app.get("/api/v1/health", (c) =>
 app.post("/api/v1/orders", async (c) => {
   const body = (await c.req.json()) as CreateOrderBody;
 
-  // productCode가 지정되면 서버 카탈로그가 금액의 유일한 기준이 된다.
-  const productCode = body.productCode?.trim();
-  const catalogItem = productCode ? AI_ING_PRODUCT_CATALOG[productCode] : undefined;
-
-  if (productCode && !catalogItem) {
-    return c.json({ message: `Unknown productCode: ${productCode}` }, 400);
-  }
-
-  const requestedAmount = catalogItem ? catalogItem.amount : body.amount;
-
-  if (!requestedAmount || requestedAmount <= 0) {
+  if (!body.amount || body.amount <= 0) {
     return c.json({ message: "amount must be greater than zero" }, 400);
   }
 
@@ -767,15 +668,7 @@ app.post("/api/v1/orders", async (c) => {
     return c.json({ message: "currency, locale, and region are required" }, 400);
   }
 
-  const currency = catalogItem ? catalogItem.currency : body.currency.toUpperCase();
-
-  if (catalogItem && body.amount !== undefined && body.amount !== catalogItem.amount) {
-    // 조작 시도를 감사 로그에 남긴다. 결제는 카탈로그 금액으로 계속 진행.
-    console.warn(
-      `[orders] amount mismatch for productCode=${productCode}: client=${body.amount}, catalog=${catalogItem.amount}`
-    );
-  }
-
+  const currency = body.currency.toUpperCase();
   const idempotencyKey = c.req.header("idempotency-key")?.trim() || body.idempotencyKey?.trim() || makeId("idem");
   const existing = await getOrderByIdempotencyKey(idempotencyKey);
 
@@ -787,9 +680,9 @@ app.post("/api/v1/orders", async (c) => {
     id: makeId("order"),
     idempotencyKey,
     orderType: "donation",
-    itemName: catalogItem ? catalogItem.itemName : body.itemName?.trim() || "Pay to Minwoo donation",
+    itemName: body.itemName?.trim() || "Pay to Minwoo donation",
     region: body.region,
-    amount: toMinorUnits(requestedAmount, currency),
+    amount: toMinorUnits(body.amount, currency),
     currency,
     note: body.note?.trim() || "",
     status: "CREATED" as OrderStatus,
@@ -903,27 +796,6 @@ app.post("/api/v1/orders/:orderId/payment-attempts/portone", async (c) => {
     return c.json({ message: "Order not found." }, 404);
   }
 
-  if (order.status === "PAID") {
-    return c.json({ message: "Order is already marked as paid." }, 409);
-  }
-
-  // 서버 검증: PortOne에 실제 결제 상태/금액을 조회해 대조한다.
-  const verification = await verifyPortOnePayment(
-    body.paymentId || orderId,
-    order.amount,
-    order.currency
-  );
-
-  // 검증 키가 설정된 상태에서 검증에 실패하면 결제 완료로 기록하지 않는다.
-  if (!verification.verified && verification.reason !== "verification_skipped_no_secret") {
-    await log("payment_attempt", orderId, "VERIFICATION_FAILED", "PortOne verification failed.", {
-      reason: verification.reason,
-      txId: body.txId,
-      paymentId: body.paymentId
-    });
-    return c.json({ message: "Payment verification failed.", reason: verification.reason }, 402);
-  }
-
   const attemptId = makeId("attempt");
   const createdAt = nowIso();
 
@@ -974,13 +846,7 @@ app.post("/api/v1/orders/:orderId/payment-attempts/portone", async (c) => {
     currency: order.currency,
     direction: "credit",
     createdAt,
-    metadata: {
-      provider: "portone",
-      method: body.method,
-      txId: body.txId,
-      verified: verification.verified,
-      verification: verification.reason
-    }
+    metadata: { provider: "portone", method: body.method, txId: body.txId }
   });
 
   await log("payment_attempt", attempt.id, "CAPTURED", `PortOne (${body.method}) capture was recorded.`, {
