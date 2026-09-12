@@ -1,5 +1,7 @@
 # Pay to Minwoo
 
+[![LIVE SITE](https://img.shields.io/badge/LIVE%20SITE-Netlify-00C7B7?style=for-the-badge&logo=netlify&logoColor=white)](https://pay-to-minwoo-web.netlify.app) [![SOURCE CODE](https://img.shields.io/badge/SOURCE%20CODE-minwoo19930301-e7322d?style=for-the-badge&logo=github&logoColor=white)](https://github.com/minwoo19930301/pay-to-minwoo)
+
 [![License: MIT](https://img.shields.io/badge/License-MIT-yellow.svg)](LICENSE)
 [![Hono](https://img.shields.io/badge/Hono-E36002?style=flat&logo=hono&logoColor=white)](https://hono.dev/)
 [![PayPal](https://img.shields.io/badge/PayPal-003087?style=flat&logo=paypal&logoColor=white)](https://developer.paypal.com/)
