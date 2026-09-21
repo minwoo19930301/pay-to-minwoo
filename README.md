@@ -1,6 +1,10 @@
 # Pay to Minwoo
 
-[![LIVE SITE](https://img.shields.io/badge/LIVE%20SITE-Netlify-00C7B7?style=for-the-badge&logo=netlify&logoColor=white)](https://pay-to-minwoo-web.netlify.app) [![SOURCE CODE](https://img.shields.io/badge/SOURCE%20CODE-minwoo19930301-e7322d?style=for-the-badge&logo=github&logoColor=white)](https://github.com/minwoo19930301/pay-to-minwoo)
+<!-- PROJECT-PRESENTATION:START -->
+<a href="https://pay-to-minwoo-web.netlify.app"><img src=".github/project-cover.svg" alt="Pay to Minwoo" width="960"></a>
+
+[![OPEN APP](https://img.shields.io/badge/OPEN%20APP-2C6049?style=for-the-badge)](https://pay-to-minwoo-web.netlify.app) [![QUICK START](https://img.shields.io/badge/QUICK%20START-374151?style=for-the-badge)](#로컬-실행) [![SOURCE](https://img.shields.io/badge/SOURCE-444444?style=for-the-badge)](https://github.com/minwoo19930301/pay-to-minwoo)
+<!-- PROJECT-PRESENTATION:END -->
 
 [![License: MIT](https://img.shields.io/badge/License-MIT-yellow.svg)](LICENSE)
 [![Hono](https://img.shields.io/badge/Hono-E36002?style=flat&logo=hono&logoColor=white)](https://hono.dev/)
